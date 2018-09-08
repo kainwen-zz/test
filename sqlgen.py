@@ -9,6 +9,7 @@ class SQLGen(object):
     def __init__(self, context, Ntabs):
         self.context = context;
         self.Ntabs = Ntabs
+        assert self.Ntabs > 4 #hard-coded
         self.tables = self.gen_tables()
 
     def gen_tables(self):
@@ -26,7 +27,23 @@ class SQLGen(object):
         tab = random.choice(tabs)
         return tab.pick_col()
 
-    def make_join_tree(self):
+    def make_group_by(self):
+        AGG_FUNC_LIST = ['avg', 'max', 'sum', 'count']
+        tabs = random.sample(self.tables, 4)
+        agg_col_tabs, group_col_tabs = tabs[:2], tabs[2:]
+        agg_cols = [t.pick_col() for t in agg_col_tabs]
+        group_cols = [t.pick_col() for t in group_col_tabs]
+        agg_funcs = [random.choice(AGG_FUNC_LIST) for _ in agg_cols]
+        jt = self.make_join()
+        range_tab = jt.dump()
+        return "select {group_cols}, {agg_cols} from {range_tab} group by {groupby_cols}"\
+                .format(group_cols=", ".join(group_cols),
+                        agg_cols=", ".join(["{func}({col})".format(func=f, col=c)
+                                            for f, c in zip(agg_funcs, agg_cols)]),
+                        range_tab=range_tab,
+                        groupby_cols=", ".join(group_cols))
+
+    def make_join(self):
         jt = self.make_join_from_tablist(self.tables)
         return jt
 
@@ -43,7 +60,7 @@ class SQLGen(object):
         join_type = JoinType.gen_join_type()
         join_cond = JoinCond.gen_join_cond([self.pick_col_from_tabs(left_tabs),
                                             self.pick_col_from_tabs(right_tabs)],
-                                           join_type.join_type == JoinType.JOIN_TYPE_RIGHT)
+                                           join_type.join_type == JoinType.JOIN_TYPE_FULL)
         return JoinTree(join_type, left, right, join_cond, None)
 
 
@@ -142,7 +159,6 @@ class JoinTree(object):
                                                                       right=right_dump,
                                                                       join_type=self.join_type.dump(),
                                                                       join_cond=self.join_cond.dump())
-            
 
 
 class Table(object):
@@ -250,3 +266,10 @@ class Table(object):
                where localoid = '{tabname}'::regclass".format(tabname=self.name,
                                                               numsegs=self.numsegs)
         return self.context.execute(sql)
+
+    def build_tables_in_new_context(self, context):
+        save_context = self.context
+        self.context = context
+        self.create()
+        self.insert()
+        self.context = save_context
